@@ -4,7 +4,7 @@
  *   GET  /api/reels?limit=200   random approved Reels (emoji clue + title + accepted alternatives)
  *   GET  /api/scores            shared Top 10
  *   POST /api/scores            {name, score, solved}
- *   POST /api/admin/seed        (Bearer ADMIN_TOKEN) ?pages=1&per=10 — create Reels for movies not yet seen
+ *   POST /api/admin/seed        (Bearer ADMIN_TOKEN) ?per=10 — up to N new Reels, resuming where the last run stopped
  *   cron (daily)                same as seed, a small batch, so the catalog keeps growing
  *
  * Secrets (never in code or the browser): TMDB_TOKEN, ANTHROPIC_API_KEY, ADMIN_TOKEN.
@@ -46,15 +46,13 @@ async function tmdb(env: Env, path: string, params: Record<string, string> = {})
   return res.json<any>();
 }
 
-async function candidates(env: Env, page: number): Promise<Omit<Movie, "keywords">[]> {
-  const [genres, list] = await Promise.all([
-    tmdb(env, "/genre/movie/list", { language: "en-US" }),
+async function candidates(env: Env, page: number, names: Record<number, string>): Promise<Omit<Movie, "keywords">[]> {
+  const [list] = await Promise.all([
     // The most-VOTED films of all time = the ones players actually know (2026-10-18: "popular" meant
     // this month's releases — "Hope (2026)", "Matchbox the Movie" — unguessable for most players).
     tmdb(env, "/discover/movie", { language: "en-US", sort_by: "vote_count.desc", "vote_count.gte": "3000",
       include_adult: "false", page: String(page) }),
   ]);
-  const names: Record<number, string> = Object.fromEntries(genres.genres.map((g: any) => [g.id, g.name]));
   return list.results
     .filter((m: any) => !m.adult && m.title && m.overview)
     .map((m: any) => ({
@@ -77,11 +75,12 @@ alone. Use only emojis: no letters, numbers, flags spelling words, or repeated e
 title's words as emoji puns unless that is the most famous way to show it. If the movie is too obscure
 or generic for a fair clue, set guessable to false.`;
 
-async function makeReel(env: Env, client: Anthropic, m: Movie) {
+async function makeReel(env: Env, client: Anthropic, m: Movie, countCall: () => void) {
   const ask = `Title: ${m.title} (${m.year})\nGenres: ${m.genres.join(", ")}\nKeywords: ${m.keywords.slice(0, 15).join(", ")}\nPlot: ${m.overview}`;
   let feedback = "";
   // One retry when the clue breaks a rule (2026-10-18: Inception used 🔝, Django Unchained gave 6).
   for (let attempt = 1; attempt <= 2; attempt++) {
+    countCall();
     const res = await client.messages.parse({
       model: MODEL,
       max_tokens: 1024,
@@ -101,12 +100,25 @@ async function makeReel(env: Env, client: Anthropic, m: Movie) {
   return { status: "rejected", note: "unreachable" } as const;
 }
 
-async function seed(env: Env, pages: number, per: number, retryRejected = false) {
-  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-  const report = { created: 0, rejected: 0, skipped: 0, errors: [] as string[] };
-  let budget = per;
-  for (let page = 1; page <= pages && budget > 0; page++) {
-    const list = await candidates(env, page);
+// Cloudflare caps outside calls per invocation (~50 on the free plan). Each movie costs up to 3
+// (keywords + Claude, + one Claude retry); each page 1. Stop well before the cap, and remember the
+// page so the next run starts where this one ended instead of re-reading from page 1 (2026-10-18:
+// later rounds hit the cap; the daily cron would have failed every day).
+const CALL_BUDGET = 44;
+
+async function seed(env: Env, maxNew: number, retryRejected = false) {
+  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 0 });
+  const report = { created: 0, rejected: 0, skipped: 0, errors: [] as string[], fromPage: 0, nextPage: 0 };
+  let calls = 0;
+  const startRow = await env.DB.prepare(`SELECT value FROM meta WHERE key = 'next_page'`).first<{ value: string }>();
+  let page = retryRejected ? 1 : Number(startRow?.value ?? 1);
+  report.fromPage = page;
+  const genres = await tmdb(env, "/genre/movie/list", { language: "en-US" }); calls++;
+  const names: Record<number, string> = Object.fromEntries(genres.genres.map((g: any) => [g.id, g.name]));
+  let made = 0;
+  outer: while (made < maxNew && calls + 4 <= CALL_BUDGET && page <= 500) {
+    const list = await candidates(env, page, names); calls++;
+    if (!list.length) break;
     const ids = list.map((m) => m.id);
     // retryRejected: a movie rejected for breaking a clue rule (not "not guessable") gets another go.
     const seen = new Set(
@@ -115,22 +127,27 @@ async function seed(env: Env, pages: number, per: number, retryRejected = false)
         .bind(...ids).all<{ tmdb_id: number }>()).results.map((r) => r.tmdb_id),
     );
     for (const base of list) {
-      if (budget <= 0) break;
       if (seen.has(base.id)) { report.skipped++; continue; }
-      budget--;
+      if (made >= maxNew || calls + 3 > CALL_BUDGET) break outer;   // page unfinished: resume it next run
+      made++;
       try {
-        const kw = await tmdb(env, `/movie/${base.id}/keywords`);
+        const kw = await tmdb(env, `/movie/${base.id}/keywords`); calls++;
         const m: Movie = { ...base, keywords: (kw.keywords ?? []).map((k: any) => k.name) };
-        const r = await makeReel(env, client, m);
+        const r = await makeReel(env, client, m, () => calls++);
         await env.DB.prepare(
           `INSERT OR REPLACE INTO reels (tmdb_id, title, year, emojis, also, genres, popularity, status, note) VALUES (?,?,?,?,?,?,?,?,?)`,
         ).bind(m.id, m.title, m.year, r.status === "ok" ? r.emojis : null, JSON.stringify(r.status === "ok" ? r.also : []),
           JSON.stringify(m.genres), m.popularity, r.status, r.status === "ok" ? null : r.note).run();
         r.status === "ok" ? report.created++ : report.rejected++;
       } catch (e) {
-        report.errors.push(`${base.title}: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200));
+        report.errors.push(`${base.title}: ${e instanceof Error ? e.message : String(e)}`.slice(0, 160)); // not stored: retried next run
       }
     }
+    page++;   // whole page handled
+  }
+  report.nextPage = page;
+  if (!retryRejected) {
+    await env.DB.prepare(`INSERT OR REPLACE INTO meta (key, value) VALUES ('next_page', ?)`).bind(String(page)).run();
   }
   return report;
 }
@@ -182,9 +199,8 @@ export default {
 
       if (url.pathname === "/api/admin/seed" && req.method === "POST") {
         if (!env.ADMIN_TOKEN || req.headers.get("Authorization") !== `Bearer ${env.ADMIN_TOKEN}`) return json({ error: "unauthorized" }, 401);
-        const pages = Math.min(Number(url.searchParams.get("pages")) || 1, 25);
-        const per = Math.min(Number(url.searchParams.get("per")) || 10, 25);
-        return json(await seed(env, pages, per, url.searchParams.get("retry") === "1"));
+        const per = Math.min(Number(url.searchParams.get("per")) || 10, 14);
+        return json(await seed(env, per, url.searchParams.get("retry") === "1"));
       }
 
       if (url.pathname === "/api/health") {
@@ -200,6 +216,6 @@ export default {
 
   // Daily: a few new popular movies, so the catalog keeps growing without anyone pressing a button.
   async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(seed(env, 40, 15).then((r) => console.log("cron seed", JSON.stringify(r))));
+    ctx.waitUntil(seed(env, 14).then((r) => console.log("cron seed", JSON.stringify(r))));
   },
 };

@@ -23,3 +23,6 @@ CREATE TABLE IF NOT EXISTS scores (
 );
 CREATE INDEX IF NOT EXISTS scores_top ON scores(score DESC);
 CREATE INDEX IF NOT EXISTS scores_ip ON scores(ip_hash, created_at);
+
+-- Where the next seed run picks up (2026-10-18: re-reading from page 1 burned the per-request call limit).
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
