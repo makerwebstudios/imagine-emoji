@@ -47,6 +47,21 @@ export default function App() {
   const [playerName, setPlayerName] = useState("");
   const [puzzlesSolved, setPuzzlesSolved] = useState(0);
   const [tmdbLoaded, setTmdbLoaded] = useState(false);
+  // How to play: opens by itself on a first visit, then from the "?" button.
+  const [showHelp, setShowHelp] = useState(() => {
+    try { return !localStorage.getItem("ie_seen_help"); } catch { return false; }
+  });
+  function closeHelp() {
+    setShowHelp(false);
+    try { localStorage.setItem("ie_seen_help", "1"); } catch { /* private mode */ }
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+  useEffect(() => {
+    if (!showHelp) return;
+    const onKey = (e) => { if (e.key === "Escape") closeHelp(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showHelp]);
   const inputRef = useRef(null);
   const nameRef = useRef(null);
   const allReelsRef = useRef(classicReels);
@@ -107,10 +122,10 @@ export default function App() {
   }, [index, triggerSpin]);
 
   useEffect(() => {
-    if (!spinning && !showNamePrompt && inputRef.current) {
+    if (!spinning && !showNamePrompt && !showHelp && inputRef.current) {
       inputRef.current.focus();
     }
-  }, [spinning, showNamePrompt]);
+  }, [spinning, showNamePrompt, showHelp]);
 
   useEffect(() => {
     if (showNamePrompt && nameRef.current) {
@@ -219,6 +234,7 @@ export default function App() {
             <span className="streak-badge">x{getMultiplier()}</span>
           )}
           <span className="score-display">{score.toLocaleString()}</span>
+          <button type="button" className="help-btn" aria-label="How to play" onClick={() => setShowHelp(true)}>?</button>
         </div>
       </header>
 
@@ -344,6 +360,25 @@ export default function App() {
           </ol>
         )}
       </section>
+
+      {showHelp && (
+        <div className="help-overlay" onClick={closeHelp}>
+          <div className="help-card" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="help-close" aria-label="Close" onClick={closeHelp}>×</button>
+            <h2 id="help-title" className="help-title">How to play</h2>
+            <p className="help-lead">Each Reel is a movie told in emojis. Type the title and press Enter.</p>
+            <ul className="help-list">
+              <li><span className="help-pts good">+100</span> Correct guess</li>
+              <li><span className="help-pts streak">×1.5</span> 3 in a row</li>
+              <li><span className="help-pts streak">×2</span> 5 in a row</li>
+              <li><span className="help-pts bad">−10</span> Wrong guess (streak resets)</li>
+              <li><span className="help-pts bad">−25</span> Reveal Reel (streak resets)</li>
+            </ul>
+            <p className="help-note">Small typos and "the" don't matter. <b>End Game</b> saves your score to the Top 10 on this device.</p>
+            <button type="button" className="btn btn-accent help-go" onClick={closeHelp}>Let's play</button>
+          </div>
+        </div>
+      )}
 
       {/* Footer Blurb */}
       <footer className="game-footer">

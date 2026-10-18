@@ -506,3 +506,38 @@ body {
     width: 100%;
   }
 }
+
+/* ─── How to play (2026-10-18) ─── */
+.help-btn {
+  margin-left: 0.75rem;
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-muted); font: 700 0.95rem "Outfit", sans-serif; cursor: pointer;
+}
+.help-btn:hover, .help-btn:focus-visible { color: var(--text); border-color: var(--accent); outline: none; }
+.help-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex; align-items: center; justify-content: center; padding: 1.25rem;
+}
+.help-card {
+  position: relative; width: 100%; max-width: 380px; max-height: calc(100dvh - 2.5rem); overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
+  padding: 1.6rem 1.4rem 1.4rem; box-shadow: 0 0 40px var(--accent-glow);
+}
+.help-close {
+  position: absolute; top: 0.6rem; right: 0.8rem; background: none; border: none;
+  color: var(--text-muted); font-size: 1.6rem; line-height: 1; cursor: pointer; padding: 0.25rem;
+}
+.help-close:hover { color: var(--text); }
+.help-title { font-size: 1.35rem; font-weight: 800; margin-bottom: 0.4rem; }
+.help-lead { color: #b5b5b5; font-size: 0.95rem; line-height: 1.45; margin-bottom: 1rem; }
+.help-list { list-style: none; display: grid; gap: 0.5rem; margin-bottom: 1rem; }
+.help-list li { display: flex; align-items: center; gap: 0.75rem; font-size: 0.95rem; }
+.help-pts { min-width: 3.4rem; text-align: center; font-weight: 800; border-radius: 8px; padding: 0.2rem 0.4rem; background: #1c1c1c; }
+.help-pts.good { color: var(--correct); }
+.help-pts.streak { color: var(--streak); }
+.help-pts.bad { color: var(--wrong); }
+.help-note { color: #9a9a9a; font-size: 0.85rem; line-height: 1.5; margin-bottom: 0.6rem; }
+.help-note b { color: var(--text); }
+.help-go { width: 100%; margin-top: 0.5rem; }
