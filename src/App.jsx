@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import puzzles from "./data/puzzles.js";
-import { fetchMovieBatch, isTmdbAvailable } from "./services/tmdb.js";
-import { generateReels } from "./engine/reelGenerator.js";
+import { fetchReels, fetchScores, postScore } from "./services/api.js";
 import { splitEmojis } from "./lib/emoji.js";
-import { isCorrect } from "./lib/answers.js";
+import { isCorrect, normalize } from "./lib/answers.js";
 
 function shuffle(arr) {
   const a = [...arr];
@@ -46,7 +45,8 @@ export default function App() {
   const [showNamePrompt, setShowNamePrompt] = useState(false);
   const [playerName, setPlayerName] = useState("");
   const [puzzlesSolved, setPuzzlesSolved] = useState(0);
-  const [tmdbLoaded, setTmdbLoaded] = useState(false);
+  const [catalogSize, setCatalogSize] = useState(classicReels.length);
+  const [boardIsGlobal, setBoardIsGlobal] = useState(false);
   // How to play: opens by itself on a first visit, then from the "?" button.
   const [showHelp, setShowHelp] = useState(() => {
     try { return !localStorage.getItem("ie_seen_help"); } catch { return false; }
@@ -67,46 +67,29 @@ export default function App() {
   const allReelsRef = useRef(classicReels);
 
   const current = queue[index];
+  const indexRef = useRef(index);
+  indexRef.current = index;
 
-  // Fetch TMDB Reels in background on mount
+  // Fresh Reels from the server (Claude-written clues for well-known movies), mixed into the rest of
+  // this round. Classics play instantly; the game never waits on the network.
   useEffect(() => {
     let cancelled = false;
-
-    async function loadTmdbReels() {
-      if (!isTmdbAvailable()) return;
-      try {
-        const sources = ["popular", "trending", "now_playing"];
-        const batches = await Promise.all(
-          sources.map((src) => fetchMovieBatch(src, 1))
-        );
-        const allMovies = batches.flat();
-
-        // Deduplicate by movie ID
-        const seen = new Set();
-        const unique = allMovies.filter((m) => {
-          if (seen.has(m.id)) return false;
-          seen.add(m.id);
-          return true;
+    fetchReels()
+      .then((reels) => {
+        if (cancelled || !reels?.length) return;
+        const have = new Set(classicReels.map((r) => normalize(r.answer)));
+        const fresh = reels.filter((r) => !have.has(normalize(r.answer)));
+        allReelsRef.current = [...classicReels, ...fresh];
+        setCatalogSize(allReelsRef.current.length);
+        setQueue((q) => {
+          const i = indexRef.current;
+          return [...q.slice(0, i + 1), ...shuffle([...q.slice(i + 1), ...fresh])];
         });
-
-        const tmdbReels = generateReels(unique);
-
-        if (!cancelled && tmdbReels.length > 0) {
-          // Merge with classics, deduplicate by answer
-          const classicAnswers = new Set(classicReels.map((r) => r.answer));
-          const freshReels = tmdbReels.filter(
-            (r) => !classicAnswers.has(r.answer)
-          );
-          const merged = [...classicReels, ...freshReels];
-          allReelsRef.current = merged;
-          setTmdbLoaded(true);
-        }
-      } catch (err) {
-        console.warn("TMDB fetch failed, using classic Reels only:", err.message);
-      }
-    }
-
-    loadTmdbReels();
+      })
+      .catch((err) => console.warn("Fresh Reels unavailable, playing the classics:", err.message));
+    fetchScores()
+      .then((scores) => { if (!cancelled) { setLeaderboard(scores); setBoardIsGlobal(true); } })
+      .catch(() => { /* keep this device's board */ });
     return () => { cancelled = true; };
   }, []);
 
@@ -193,8 +176,11 @@ export default function App() {
   function handleSaveName(e) {
     e.preventDefault();
     const name = playerName.trim() || "Anonymous";
-    const updated = saveToLeaderboard(name, score);
-    setLeaderboard(updated);
+    const local = saveToLeaderboard(name, score);
+    postScore(name, score, puzzlesSolved)
+      .then(fetchScores)
+      .then((scores) => { setLeaderboard(scores); setBoardIsGlobal(true); })
+      .catch(() => { setLeaderboard(local); setBoardIsGlobal(false); });
     setShowNamePrompt(false);
     setPlayerName("");
     resetGame();
@@ -340,8 +326,8 @@ export default function App() {
       {/* Leaderboard */}
       <section className="leaderboard">
         <h3 className="lb-title">
-          Top 10
-          {tmdbLoaded && <span className="tmdb-tag">TMDB Connected</span>}
+          Top 10{boardIsGlobal ? " · everyone" : " · this device"}
+          <span className="tmdb-tag">{catalogSize.toLocaleString()} movies</span>
         </h3>
         {leaderboard.length === 0 ? (
           <p className="lb-empty">No scores yet. Be the first!</p>
@@ -374,7 +360,8 @@ export default function App() {
               <li><span className="help-pts bad">−10</span> Wrong guess (streak resets)</li>
               <li><span className="help-pts bad">−25</span> Reveal Reel (streak resets)</li>
             </ul>
-            <p className="help-note">Small typos and "the" don't matter. <b>End Game</b> saves your score to the Top 10 on this device.</p>
+            <p className="help-note">Small typos and "the" don't matter. <b>End Game</b> puts your score on the Top 10.</p>
+            <p className="help-note"><span className="source-badge classic">Classic</span> hand-made · <span className="source-badge fresh">Fresh</span> from the movie database</p>
             <button type="button" className="btn btn-accent help-go" onClick={closeHelp}>Let's play</button>
           </div>
         </div>
@@ -383,6 +370,10 @@ export default function App() {
       {/* Footer Blurb */}
       <footer className="game-footer">
         Guess the movie from emojis alone.
+        <span className="tmdb-credit">
+          Movie data from <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer">TMDB</a>.
+          This product uses the TMDB API but is not endorsed or certified by TMDB.
+        </span>
       </footer>
     </div>
   );

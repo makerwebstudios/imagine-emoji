@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "imagine-emoji-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ALLOWED_ORIGINS": "https://makerwebstudios.github.io,http://localhost:5173,http://localhost:4173"
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "imagine-emoji", "database_id": "154ef87e-1f03-4401-8327-4c8540506e79" }
+  ],
+  // Daily at 09:00 UTC: up to 15 new popular movies become Reels.
+  "triggers": { "crons": ["0 9 * * *"] },
+  "observability": { "enabled": true }
+}

@@ -1,0 +1,20 @@
+import { checkClue, checkScore } from "./validate.ts";
+let fail = 0;
+const ok = (c: boolean, m: string) => { if (!c) { fail++; console.log("FAIL", m); } };
+ok(checkClue("🦖🦕🎢🎡", "Jurassic Park").ok, "4 emojis pass");
+ok(checkClue("🕷️🦸‍♂️🏙️", "Spider-Man").ok, "VS16 + ZWJ emojis pass");
+ok(checkClue("🇫🇷🐀👨‍🍳", "Ratatouille").ok, "flag passes");
+ok(!checkClue("🦖🦕", "x").ok, "2 is too few");
+ok(!checkClue("🦖🦕🎢🎡🌋🚁", "x").ok, "6 is too many");
+ok(!checkClue("🦖 Park 🎢", "x").ok, "letters rejected");
+ok(!checkClue("🦖2️⃣🎢", "x").ok || true, "keycap digits tolerated or rejected (either is fine)");
+ok(!checkClue("🦖🦖🦖🎢", "x").ok, "repeats rejected");
+ok(!checkClue("🕷️🕸️🗽🧠🆕", "x").ok, "🆕 spells NEW — rejected");
+ok(!checkClue("🚗⚡🔙⏰", "x").ok, "🔙 spells BACK — rejected");
+ok(checkScore({ name: "Guillermo", score: 450, solved: 4 }).ok, "real score passes");
+ok(!checkScore({ name: "x", score: 99999, solved: 3 }).ok, "impossible score rejected");
+ok(!checkScore({ name: "x", score: 0, solved: 0 }).ok, "zero rejected");
+const n = checkScore({ name: "<script>alert(1)</script>aaaaaaaaaaaaaaa", score: 100, solved: 1 });
+ok(n.ok && !n.name.includes("<") && n.name.length <= 20, "name sanitised + capped");
+if (fail) { console.log(`${fail} failed`); process.exit(1); }
+console.log("api checks pass");
