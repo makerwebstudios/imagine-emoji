@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import puzzles from "./data/puzzles.js";
 import { fetchMovieBatch, isTmdbAvailable } from "./services/tmdb.js";
 import { generateReels } from "./engine/reelGenerator.js";
+import { splitEmojis } from "./lib/emoji.js";
+import { isCorrect } from "./lib/answers.js";
 
 function shuffle(arr) {
   const a = [...arr];
@@ -138,10 +140,7 @@ export default function App() {
     e.preventDefault();
     if (!guess.trim() || feedback) return;
 
-    const normalized = guess.trim().toLowerCase().replace(/['']/g, "'");
-    const answer = current.answer.toLowerCase();
-
-    if (normalized === answer) {
+    if (isCorrect(guess, current)) {
       const mult = getMultiplier();
       const points = Math.round(100 * mult);
       setScore((s) => s + points);
@@ -196,9 +195,7 @@ export default function App() {
     setFeedback(null);
   }
 
-  const emojiChars = current
-    ? current.emojis.match(/\p{Emoji_Presentation}(\u200d\p{Emoji_Presentation})*/gu) || []
-    : [];
+  const emojiChars = current ? splitEmojis(current.emojis) : [];
 
   const displayAnswer = current
     ? (current.title || current.answer.replace(/\b\w/g, (c) => c.toUpperCase()))

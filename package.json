@@ -3,13 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "homepage": "https://guillermoza.github.io/imagine-emoji",
+  "homepage": "https://makerwebstudios.github.io/imagine-emoji",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "predeploy": "npm run check && npm run build",
+    "deploy": "gh-pages -d dist",
+    "check": "node scripts/check.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

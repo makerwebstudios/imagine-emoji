@@ -187,9 +187,10 @@ export function generateReel(movie) {
   return {
     emojis: picked.join(""),
     answer: movie.title.toLowerCase(),
-    title: movie.title, // Keep original casing for display
+    title: movie.title,
     source: "tmdb",
     tmdbId: movie.id,
+    genres: movie.genres,
   };
 }
 
